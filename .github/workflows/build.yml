@@ -2,9 +2,11 @@ name: Build Dual Debs (Roothide & Rootless)
 
 on:
   push:
-    branches: [ main, master, release ]
+    branches:
+      - '**'
   pull_request:
-    branches: [ main, master, release ]
+    branches:
+      - '**'
   workflow_dispatch:
 
 jobs:
