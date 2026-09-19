@@ -1,88 +1,129 @@
-name: Build Package
+name: Build Dual Debs (Roothide & Rootless)
 
 on:
   workflow_dispatch:
 
-env:
-  VERSION: 1.0
-  FINALPACKAGE: 1
-  HOMEBREW_NO_AUTO_UPDATE: 1
-  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
-
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
-    - name: Setup Xcode
-      uses: maxim-lobanov/setup-xcode@v1
-      with:
-        xcode-version: '15.4'
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Setup Environment
-      run: |
-        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
-        echo "THEOS_IGNORE_PARALLEL_BUILDING_NOTICE=yes" >> $HOME/.theosrc
+      - name: Install Dependencies
+        run: |
+          brew install ldid
 
-    - name: Setup Theos
-      run: |
-        bash -c "$(curl -fsSL https://raw.githubusercontent.com/owngoal-dev/theos/master/bin/install-theos)"
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone Roothide Theos and SDKs
+        run: |
+          git clone --recursive https://github.com/roothide/theos.git $HOME/theos
+          rm -rf $HOME/theos/sdks
+          git clone --depth=1 https://github.com/theos/sdks.git $HOME/theos/sdks
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-    - name: Setup Environment (RootHide)
-      run: |
-        echo "THEOS=$HOME/theos-roothide" >> $GITHUB_ENV
+      - name: Install AltList
+        run: |
+          git clone --depth=1 https://github.com/opa334/AltList.git $HOME/AltList
+          chmod +x $HOME/AltList/install_to_theos.sh
+          cd $HOME/AltList
+          ./install_to_theos.sh
 
-    - name: Setup Theos (RootHide)
-      run: |
-        bash -c "$(curl -fsSL https://raw.githubusercontent.com/owngoal-dev/theos-roothide/master/bin/install-theos)"
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Cephei Framework
+        run: |
+          echo "========================================"
+          echo "Installing Cephei to Theos"
+          echo "========================================"
+          git clone --depth=1 https://github.com/hbang/libcephei.git $HOME/libcephei
+          mkdir -p $HOME/theos/include/Cephei
+          cp -R $HOME/libcephei/Cephei/*.h $HOME/theos/include/Cephei/ || true
+          cp -R $HOME/libcephei/CepheiPrefs/*.h $HOME/theos/include/CepheiPrefs/ || true
 
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Locate Preferences Framework
+        run: |
+          echo "========================================"
+          echo "Searching Theos for Preferences.framework"
+          echo "========================================"
 
-    - name: Build (arm)
-      run: |
-        source devkit/env.sh
-        make package
+          PREFS_FRAMEWORK=$(find "$HOME/theos" \
+            -type d \
+            -name "Preferences.framework" \
+            -print \
+            -quit)
 
-    - name: Build (arm64)
-      run: |
-        source devkit/rootless.sh
-        make package
+          if [ -n "$PREFS_FRAMEWORK" ]; then
+            echo "Found in Theos:"
+            echo "$PREFS_FRAMEWORK"
+          else
+            echo "Not found in Theos."
+            echo "Searching Xcode SDKs..."
 
-    - name: Build (arm64e)
-      run: |
-        source devkit/roothide.sh
-        make package
+            PREFS_FRAMEWORK=$(find \
+              "/Applications/Xcode.app/Contents/Developer/Platforms" \
+              -type d \
+              -name "Preferences.framework" \
+              -print \
+              -quit 2>/devnull || true)
+          fi
 
-    - name: Collect dSYMs
-      run: |
-        find .theos/obj -name "*.dSYM" -exec cp -r {} ./packages/ \;
-        VERSION=$(grep '^Version:' .theos/_/DEBIAN/control | awk '{print $2}')
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
+          if [ -z "$PREFS_FRAMEWORK" ]; then
+            echo "ERROR: Preferences.framework was not found."
+            echo ""
+            echo "Theos:"
+            find "$HOME/theos" -type d -iname "*Preferences*" -print || true
+            echo ""
+            echo "Xcode:"
+            find "/Applications/Xcode.app/Contents/Developer/Platforms" \
+              -type d \
+              -iname "*Preferences*" \
+              -print 2>/devnull || true
+            exit 1
+          fi
 
-    - name: Upload dSYMs
-      uses: actions/upload-artifact@v4
-      with:
-        name: symbols-${{ env.VERSION }}
-        path: |
-          ./packages/*.dSYM
+          echo "========================================"
+          echo "Using:"
+          echo "$PREFS_FRAMEWORK"
+          echo "========================================"
 
-    - name: Upload Packages
-      uses: actions/upload-artifact@v4
-      with:
-        name: packages-${{ env.VERSION }}
-        path: |
-          ./packages/*.deb
+          mkdir -p "$HOME/theos/lib/iphone"
+          rm -rf "$HOME/theos/lib/iphone/Preferences.framework"
+          cp -R "$PREFS_FRAMEWORK" "$HOME/theos/lib/iphone/Preferences.framework"
 
-    - name: Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: v${{ env.VERSION }}
-        draft: true
-        prerelease: false
-        files: |
-          ./packages/*.deb
+          echo "Installed Preferences.framework:"
+          ls -la "$HOME/theos/lib/iphone/Preferences.framework"
+
+      - name: Verify AltList and Preferences Installation
+        run: |
+          echo "========================================"
+          echo "Checking AltList & Preferences installation"
+          echo "========================================"
+
+          find "$HOME/theos" \
+            \( -iname "*AltList*" -o -iname "AltList.framework" \) \
+            -print || true
+
+          echo ""
+          echo "Checking Preferences:"
+          ls -la "$HOME/theos/lib/iphone/Preferences.framework" || true
+
+      - name: Build Roothide Package
+        run: |
+          make clean package \
+            THEOS_PACKAGE_SCHEME=roothide \
+            SYSROOT=$HOME/theos/sdks/iPhoneOS16.5.sdk \
+            FINALPACKAGE=1
+
+      - name: Build Rootless Package
+        run: |
+          make clean package \
+            THEOS_PACKAGE_SCHEME=rootless \
+            SYSROOT=$HOME/theos/sdks/iPhoneOS16.5.sdk \
+            FINALPACKAGE=1
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiCellSwitcher-Debs
+          path: packages/*.deb
