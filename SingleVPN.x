@@ -1,14 +1,14 @@
 #import <HBLog.h>
 #import <UIKit/UIKit.h>
 #import <dlfcn.h>
-
 #import "Common.h"
 #import "UIColor+.h"
 
 #define IsNetworkTypeText(text) ( \
     [text isEqualToString:@"G"] || [text isEqualToString:@"3G"] || \
     [text isEqualToString:@"4G"] || [text containsString:@"5G"] || \
-    [text isEqualToString:@"LTE"])
+    [text isEqualToString:@"6G"] || [text isEqualToString:@"7G"] || \
+    [text isEqualToString:@"8G"] || [text isEqualToString:@"LTE"])
 
 @interface STStatusBarDataEntry : NSObject
 @property (getter=isEnabled, nonatomic, readonly) bool enabled;
@@ -63,9 +63,7 @@ static UIColor *_darkReplacementColor = nil;
 static UIColor *_lightReplacementColor = nil;
 
 static UIColor *svpnColorWithHexString(NSString *hexString) {
-    if (!hexString) {
-        return nil;
-    }
+    if (!hexString) return nil;
     return [UIColor svpn_colorWithExternalRepresentation:hexString];
 }
 
@@ -78,12 +76,10 @@ static void ReloadPrefs() {
     if (!prefs) {
         prefs = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.singlevpnprefs"];
     }
-
     NSDictionary *settings = [prefs dictionaryRepresentation];
     _isEnabled = settings[@"IsEnabled"] ? [settings[@"IsEnabled"] boolValue] : YES;
     _isEnabledReversed = settings[@"IsEnabledReversed"] ? [settings[@"IsEnabledReversed"] boolValue] : NO;
     _isForce5GAEnabled = settings[@"IsForce5GAEnabled"] ? [settings[@"IsForce5GAEnabled"] boolValue] : NO;
-
     _lightReplacementColor = svpnColorWithHexString(settings[@"ForegroundColorLight"]) ?: [UIColor colorWithRed:0.19607843137254902 green:0.7803921568627451 blue:0.34901960784313724 alpha:1];
     _darkReplacementColor = svpnColorWithHexString(settings[@"ForegroundColorDark"]) ?: [UIColor colorWithRed:0.17254901960784313 green:0.8156862745098039 blue:0.3411764705882353 alpha:1];
 }
@@ -94,38 +90,32 @@ static void ReloadPrefs() {
 
 - (id)applyUpdate:(_UIStatusBarItemUpdate *)update toDisplayItem:(_UIStatusBarDisplayItem *)displayItem {
     _isVPNEnabled = update.data.vpnEntry.enabled;
-
     id result = %orig;
-
     UIColor *originalColor = update.styleAttributes.textColor;
     UIColor *newColor = nil;
-
     BOOL decision = _isEnabledReversed ? !_isVPNEnabled : _isVPNEnabled;
     if (decision) {
         newColor = svpnColorWithTextColor(originalColor);
     }
-
-    if (!newColor) { newColor = update.styleAttributes.imageTintColor ?: originalColor; }
-
+    if (!newColor) {
+        newColor = update.styleAttributes.imageTintColor ?: originalColor;
+    }
     for (_UIStatusBarDisplayItem *item in self.displayItems.allValues) {
         %orig(update, item);
-
         if (item.view == self.networkIconView && [item.view isKindOfClass:%c(_UIStatusBarImageView)]) {
             _UIStatusBarImageView *imageView = (_UIStatusBarImageView *)item.view;
             [imageView setTintColor:newColor];
         }
     }
-
     return result;
 }
 
 - (UIColor *)_fillColorForUpdate:(_UIStatusBarItemUpdate *)update entry:(_UIStatusBarDataWifiEntry *)entry {
     BOOL decision = _isEnabledReversed ? !_isVPNEnabled : _isVPNEnabled;
-    if (decision) { 
+    if (decision) {
         return svpnColorWithTextColor(update.styleAttributes.textColor);
-    } else {
-        return %orig; 
     }
+    return %orig;
 }
 
 %end
@@ -134,46 +124,39 @@ static void ReloadPrefs() {
 
 - (id)applyUpdate:(_UIStatusBarItemUpdate *)update toDisplayItem:(_UIStatusBarDisplayItem *)displayItem {
     _isVPNEnabled = update.data.vpnEntry.enabled;
-
     id result = %orig;
-
     UIColor *originalColor = update.styleAttributes.textColor;
     UIColor *newColor = nil;
-
     BOOL decision = _isEnabledReversed ? !_isVPNEnabled : _isVPNEnabled;
     if (decision) {
         newColor = svpnColorWithTextColor(originalColor);
     }
-
-    if (!newColor) { newColor = originalColor; }
-
+    if (!newColor) {
+        newColor = originalColor;
+    }
     for (_UIStatusBarDisplayItem *item in self.displayItems.allValues) {
         _UIStatusBarStringView *stringView = nil;
-
         if ([item.view isKindOfClass:%c(_UIStatusBarCellularNetworkTypeView)]) {
             stringView = ((_UIStatusBarCellularNetworkTypeView *)item.view).stringView;
+            [stringView setTextColor:newColor];
         } else if ([item.view isKindOfClass:%c(_UIStatusBarStringView)]) {
             stringView = (_UIStatusBarStringView *)item.view;
-        }
-
-        if (IsNetworkTypeText(stringView.text)) {
-            [stringView setTextColor:newColor];
-        } else {
-            [stringView setTextColor:originalColor];
+            if (IsNetworkTypeText(stringView.text)) {
+                [stringView setTextColor:newColor];
+            } else {
+                [stringView setTextColor:originalColor];
+            }
         }
     }
-
     return result;
 }
 
 %end
 
-
 %hook _UIStatusBarStringView
 
 - (void)applyStyleAttributes:(_UIStatusBarStyleAttributes *)styleAttrs {
     %orig;
-
     BOOL decision = _isEnabledReversed ? !_isVPNEnabled : _isVPNEnabled;
     if (decision && IsNetworkTypeText(self.text)) {
         [self setTextColor:svpnColorWithTextColor(styleAttrs.textColor)];
@@ -182,7 +165,7 @@ static void ReloadPrefs() {
 
 %end
 
-%end // SingleVPN_16
+%end
 
 %group SingleVPN_17
 
@@ -200,7 +183,6 @@ static void ReloadPrefs() {
     if (changed && currentData.wifiEntry && !data.wifiEntry) {
         data = [data dataByReplacingEntry:[currentData.wifiEntry copy] forKey:@"wifiEntry"];
     }
-
     _isVPNEnabled = currentData.vpnEntry.enabled || data.vpnEntry.enabled;
     %orig;
 }
@@ -217,7 +199,6 @@ static void ReloadPrefs() {
     if (changed && currentData.wifiEntry && !data.wifiEntry) {
         data = [data dataByReplacingEntry:[currentData.wifiEntry copy] forKey:@"wifiEntry"];
     }
-
     _isVPNEnabled = currentData.vpnEntry.enabled || data.vpnEntry.enabled;
     %orig;
 }
@@ -237,18 +218,14 @@ static void ReloadPrefs() {
         }
         return;
     }
-
     if (@available(iOS 16, *)) {
         %orig;
-
         NSAttributedString *attributedText = self.stringView.attributedText;
         self.widthConstraint.active = NO;
-
         NSLayoutConstraint *newWidthConstraint = [NSLayoutConstraint constraintWithItem:self attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:0];
         newWidthConstraint.constant = [attributedText size].width * 0.9;
         newWidthConstraint.priority = UILayoutPriorityRequired;
         newWidthConstraint.active = YES;
-
         objc_setAssociatedObject(self, @selector(widthConstraint), newWidthConstraint, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     } else {
         %orig;
@@ -262,43 +239,27 @@ static void ReloadPrefs() {
 %new
 - (void)svpnApply5GAdvancedAttributesIfNeeded {
     if (@available(iOS 16, *)) {
-        if (!_isForce5GAEnabled) {
-            return;
-        }
-
+        if (!_isForce5GAEnabled) return;
         NSString *text = self.text;
-        if (!IsNetworkTypeText(text)) {
-            return;
-        }
-
+        if (!IsNetworkTypeText(text)) return;
         UIFont *font = self.font;
-        if (!font) {
-            return;
-        }
-
+        if (!font) return;
         UIColor *textColor = self.textColor;
-        if (!textColor) {
-            return;
-        }
-
+        if (!textColor) return;
         NSString *newText = @"5GA";
         NSInteger prefixLength = 2;
         NSMutableAttributedString *attributedText = [[NSMutableAttributedString alloc] initWithString:newText attributes:@{
             NSFontAttributeName: font,
             NSForegroundColorAttributeName: textColor,
         }];
-
         NSMutableDictionary *traits = [[font.fontDescriptor objectForKey:UIFontDescriptorTraitsAttribute] mutableCopy] ?: [NSMutableDictionary dictionary];
         traits[UIFontWidthTrait] = @(UIFontWidthCondensed / 1.5);
         traits[UIFontWeightTrait] = @(UIFontWeightSemibold);
-
         UIFontDescriptor *condensedDescriptor = [font.fontDescriptor fontDescriptorByAddingAttributes:@{UIFontDescriptorTraitsAttribute: traits}];
         UIFont *condensedFont = [UIFont fontWithDescriptor:condensedDescriptor size:0];
         UIFont *smallerCondensedFont = [condensedFont fontWithSize:condensedFont.pointSize * 0.7];
-
         [attributedText addAttribute:NSFontAttributeName value:condensedFont range:NSMakeRange(0, prefixLength)];
         [attributedText addAttribute:NSFontAttributeName value:smallerCondensedFont range:NSMakeRange(prefixLength, attributedText.length - prefixLength)];
-
         self.attributedText = attributedText;
     }
 }
@@ -309,19 +270,16 @@ static void ReloadPrefs() {
         styleAttrs = [styleAttrs copy];
         [styleAttrs setTextColor:svpnColorWithTextColor(styleAttrs.textColor)];
     }
-
     %orig;
     [self svpnApply5GAdvancedAttributesIfNeeded];
 }
 
 - (void)setText:(NSString *)text {
     %orig;
-
     BOOL decision = _isEnabledReversed ? !_isVPNEnabled : _isVPNEnabled;
     if (decision && IsNetworkTypeText(text)) {
         [self setTextColor:svpnColorWithTextColor(self.textColor)];
     }
-
     [self svpnApply5GAdvancedAttributesIfNeeded];
 }
 
@@ -334,7 +292,6 @@ static void ReloadPrefs() {
     if (decision) {
         activeColor = svpnColorWithTextColor(activeColor);
     }
-
     %orig;
 }
 
@@ -343,7 +300,6 @@ static void ReloadPrefs() {
     if (decision) {
         inactiveColor = [svpnColorWithTextColor(inactiveColor) colorWithAlphaComponent:0.2];
     }
-
     %orig;
 }
 
@@ -355,29 +311,24 @@ static void ReloadPrefs() {
         [styleAttrs setImageTintColor:newColor];
         [styleAttrs setImageDimmedTintColor:[newColor colorWithAlphaComponent:0.2]];
     }
-
     %orig;
 }
 
 %end
 
-%end // SingleVPN_17
+%end
 
 %ctor {
     ReloadPrefs();
-    if (!_isEnabled) {
-        return;
-    }
-
+    if (!_isEnabled) return;
     CFNotificationCenterAddObserver(
-        CFNotificationCenterGetDarwinNotifyCenter(), 
-        NULL, 
-        (CFNotificationCallback)ReloadPrefs, 
-        CFSTR("com.82flex.singlevpnprefs/saved"), 
-        NULL, 
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        (CFNotificationCallback)ReloadPrefs,
+        CFSTR("com.82flex.singlevpnprefs/saved"),
+        NULL,
         CFNotificationSuspensionBehaviorCoalesce
     );
-
     if (@available(iOS 17, *)) {
         dlopen("/System/Library/PrivateFrameworks/StatusStatusUI.framework/StatusStatusUI", RTLD_LAZY);
         %init(SingleVPN_17);
